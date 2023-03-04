@@ -4,19 +4,22 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"regexp"
+
+	"gopkg.in/yaml.v3"
 )
 
 type LineType int64
 
 const (
-	Title LineType = iota
-	Subtitle
-	Page
-	Empty
-	Note
+	titleLine LineType = iota
+	subtitleLine
+	pageLine
+	emptyLine
+	noteLine
 )
 
 type Line struct {
@@ -25,20 +28,66 @@ type Line struct {
 }
 
 var lineTypeRegex = map[LineType]regexp.Regexp{
-	Title:    *regexp.MustCompile(`^#\s.*?$`),
-	Subtitle: *regexp.MustCompile(`^##\s.*?$`),
-	Page:     *regexp.MustCompile(`^\d+?$`),
-	Empty:    *regexp.MustCompile(`^\s*?$`),
-	Note:     *regexp.MustCompile(`^.*?$`),
+	titleLine:    *regexp.MustCompile(`^#\s.*?$`),
+	subtitleLine: *regexp.MustCompile(`^##\s.*?$`),
+	pageLine:     *regexp.MustCompile(`^\d+?$`),
+	emptyLine:    *regexp.MustCompile(`^\s*?$`),
+	noteLine:     *regexp.MustCompile(`^.*?$`),
+}
+
+type Note struct {
+	Text     string
+	Subtitle string
+	Page     string
+	Tag      []string
+}
+
+type NoteFile struct {
+	Author string
+	Title  string
+	Notes  []Note
 }
 
 func ParseToYaml(file *os.File) {
 	lines := parseLines(file)
-	fmt.Print(lines)
-	// TODO: Create yaml.
+	noteFile := createNoteFile(lines)
+
+	noteYaml, err := yaml.Marshal(&noteFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err2 := ioutil.WriteFile(fmt.Sprintf("%s.yaml", file.Name()), noteYaml, 0666)
+	if err2 != nil {
+		log.Fatal(err2)
+	}
+
+	file.Close()
 }
 
-func parseLines(file *os.File) *[]Line {
+func createNoteFile(lines []Line) *NoteFile {
+	title := ""
+	subtitle := ""
+	page := ""
+	notes := []Note{}
+
+	for _, l := range lines {
+		if l.type_ == titleLine {
+			title = l.text
+		} else if l.type_ == subtitleLine {
+			subtitle = l.text
+		} else if l.type_ == pageLine {
+			page = l.text
+		} else if l.type_ == noteLine {
+			note := Note{Text: l.text, Subtitle: subtitle, Page: page, Tag: []string{"dummy"}}
+			notes = append(notes, note)
+		}
+	}
+
+	return &NoteFile{Author: "", Title: title, Notes: notes}
+}
+
+func parseLines(file *os.File) []Line {
 	fileScanner := bufio.NewScanner(file)
 	fileScanner.Split(bufio.ScanLines)
 
@@ -56,16 +105,15 @@ func parseLines(file *os.File) *[]Line {
 		lines = append(lines, l)
 	}
 
-	return &lines
+	return lines
 }
 
 func getLine(text string) (Line, error) {
-	fmt.Println(text)
 	for type_, rgx := range lineTypeRegex {
 		if rgx.MatchString(text) == true {
 			return Line{text: text, type_: type_}, nil
 		}
 	}
 
-	return Line{text: "", type_: Empty}, errors.New("unknown line type")
+	return Line{text: "", type_: emptyLine}, errors.New("unknown line type")
 }
