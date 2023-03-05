@@ -23,8 +23,8 @@ const (
 )
 
 type Line struct {
-	text  string
-	type_ LineType
+	Text string
+	Type LineType
 }
 
 var lineTypeRegex = map[LineType]regexp.Regexp{
@@ -50,16 +50,20 @@ type NoteFile struct {
 
 func ParseToYaml(file *os.File) {
 	lines := parseLines(file)
-	noteFile := createNoteFile(lines)
-
-	noteYaml, err := yaml.Marshal(&noteFile)
+	err := validateLines(lines)
 	if err != nil {
 		log.Fatal(err)
 	}
+	noteFile := createNoteFile(lines)
 
-	err2 := ioutil.WriteFile(fmt.Sprintf("%s.yaml", file.Name()), noteYaml, 0666)
+	noteYaml, err2 := yaml.Marshal(&noteFile)
 	if err2 != nil {
 		log.Fatal(err2)
+	}
+
+	err3 := ioutil.WriteFile(fmt.Sprintf("%s.yaml", file.Name()), noteYaml, 0666)
+	if err3 != nil {
+		log.Fatal(err3)
 	}
 
 	file.Close()
@@ -72,14 +76,15 @@ func createNoteFile(lines []Line) *NoteFile {
 	notes := []Note{}
 
 	for _, l := range lines {
-		if l.type_ == titleLine {
-			title = l.text
-		} else if l.type_ == subtitleLine {
-			subtitle = l.text
-		} else if l.type_ == pageLine {
-			page = l.text
-		} else if l.type_ == noteLine {
-			note := Note{Text: l.text, Subtitle: subtitle, Page: page, Tag: []string{"dummy"}}
+		switch l.Type {
+		case titleLine:
+			title = l.Text
+		case subtitleLine:
+			subtitle = l.Text
+		case pageLine:
+			page = l.Text
+		case noteLine:
+			note := Note{Text: l.Text, Subtitle: subtitle, Page: page, Tag: []string{"dummy"}}
 			notes = append(notes, note)
 		}
 	}
@@ -88,6 +93,7 @@ func createNoteFile(lines []Line) *NoteFile {
 }
 
 func parseLines(file *os.File) []Line {
+
 	fileScanner := bufio.NewScanner(file)
 	fileScanner.Split(bufio.ScanLines)
 
@@ -99,7 +105,7 @@ func parseLines(file *os.File) []Line {
 
 		l, err := getLine(text)
 		if err != nil {
-			log.Fatalln("cannot parse given file")
+			log.Fatal(err)
 		}
 
 		lines = append(lines, l)
@@ -108,12 +114,39 @@ func parseLines(file *os.File) []Line {
 	return lines
 }
 
-func getLine(text string) (Line, error) {
-	for type_, rgx := range lineTypeRegex {
-		if rgx.MatchString(text) == true {
-			return Line{text: text, type_: type_}, nil
+func validateLines(lines []Line) error {
+	currType := emptyLine
+	prevType := emptyLine
+
+	for _, l := range lines {
+		currType = l.Type
+
+		if currType == titleLine {
+			if prevType != emptyLine {
+				return errors.New("title starting with # has to be in the first line")
+			}
+		} else if currType == noteLine {
+			if prevType != pageLine {
+				return errors.New(fmt.Sprintf("note has to follow page number, note: %s", l.Text))
+			}
+		}
+
+		if currType != emptyLine {
+			prevType = currType
 		}
 	}
 
-	return Line{text: "", type_: emptyLine}, errors.New("unknown line type")
+	return nil
+}
+
+func getLine(text string) (Line, error) {
+	var lineTypesOrder = [...]LineType{titleLine, subtitleLine, pageLine, emptyLine, noteLine}
+	for _, t := range lineTypesOrder {
+		rgx := lineTypeRegex[t]
+		if rgx.MatchString(text) == true {
+			return Line{Text: text, Type: t}, nil
+		}
+	}
+
+	return Line{Text: "", Type: emptyLine}, errors.New("unknown line type")
 }
