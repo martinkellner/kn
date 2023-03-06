@@ -8,6 +8,9 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strings"
+
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -27,8 +30,7 @@ type Line struct {
 	Type LineType
 }
 
-var lineTypeRegex = map[LineType]regexp.Regexp{
-	titleLine:    *regexp.MustCompile(`^#\s.*?$`),
+var lineTypeRegex = map[LineType]regexp.Regexp{titleLine: *regexp.MustCompile(`^#\s.*?$`),
 	subtitleLine: *regexp.MustCompile(`^##\s.*?$`),
 	pageLine:     *regexp.MustCompile(`^\d+?$`),
 	emptyLine:    *regexp.MustCompile(`^\s*?$`),
@@ -50,10 +52,10 @@ type NoteFile struct {
 
 func ParseToYaml(file *os.File) {
 	lines := parseLines(file)
-	err := validateLines(lines)
-	if err != nil {
+	if err := validateLines(lines); err != nil {
 		log.Fatal(err)
 	}
+
 	noteFile := createNoteFile(lines)
 
 	noteYaml, err2 := yaml.Marshal(&noteFile)
@@ -61,9 +63,11 @@ func ParseToYaml(file *os.File) {
 		log.Fatal(err2)
 	}
 
-	err3 := ioutil.WriteFile(fmt.Sprintf("%s.yaml", file.Name()), noteYaml, 0666)
-	if err3 != nil {
-		log.Fatal(err3)
+	output := file.Name()
+	output = output[0 : len(output)-len(filepath.Ext(output))]
+	output = fmt.Sprintf("%s.yaml", output)
+	if err := ioutil.WriteFile(output, noteYaml, 0666); err != nil {
+		log.Fatal(err)
 	}
 
 	file.Close()
@@ -143,7 +147,11 @@ func getLine(text string) (Line, error) {
 	var lineTypesOrder = [...]LineType{titleLine, subtitleLine, pageLine, emptyLine, noteLine}
 	for _, t := range lineTypesOrder {
 		rgx := lineTypeRegex[t]
+
 		if rgx.MatchString(text) == true {
+			text = strings.TrimLeft(text, "#")
+			text = strings.TrimSpace(text)
+
 			return Line{Text: text, Type: t}, nil
 		}
 	}
